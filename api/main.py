@@ -29,6 +29,7 @@ from api.routers import (
     config,
     credentials,
     embedding,
+    embedding_queue,
     embedding_rebuild,
     episode_profiles,
     insights,
@@ -388,6 +389,7 @@ app.include_router(models.router, prefix="/api", tags=["models"])
 app.include_router(transformations.router, prefix="/api", tags=["transformations"])
 app.include_router(notes.router, prefix="/api", tags=["notes"])
 app.include_router(embedding.router, prefix="/api", tags=["embedding"])
+app.include_router(embedding_queue.router, prefix="/api", tags=["embedding-queue"])
 app.include_router(
     embedding_rebuild.router, prefix="/api/embeddings", tags=["embeddings"]
 )
