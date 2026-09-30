@@ -1,0 +1,7 @@
+-- Migration 26: index source.updated / source.created so the sources list
+-- (ORDER BY updated|created ... LIMIT) iterates the index instead of reading
+-- every source record. Source records carry the full extracted text (hundreds
+-- of MB across a library), so the unindexed sort read all of it per page:
+-- ~2.7 s -> ~70 ms on 1000 sources x 400 KB (SurrealDB 2.6, rocksdb).
+DEFINE INDEX IF NOT EXISTS idx_source_updated ON source FIELDS updated;
+DEFINE INDEX IF NOT EXISTS idx_source_created ON source FIELDS created;
