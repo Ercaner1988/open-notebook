@@ -16,9 +16,36 @@ import asyncio
 from loguru import logger
 
 import commands  # noqa: F401  registers all commands (like --import-modules commands)
-from open_notebook.database.repository import ensure_record_id, repo_query
+from open_notebook.database.repository import (
+    db_connection,
+    ensure_record_id,
+    parse_record_ids,
+)
 
 POLL_SECONDS = 1.0
+
+# One long-lived connection instead of the stock repo_query's connect + sign-in
+# per call: sign-in costs ~1 s (argon2), and this loop queries every second.
+_conn = None  # (context manager, db)
+
+
+async def repo_query(query, vars=None):
+    global _conn
+    if _conn is None:
+        cm = db_connection()
+        _conn = (cm, await cm.__aenter__())
+    try:
+        result = parse_record_ids(await _conn[1].query(query, vars))
+    except Exception:
+        cm, _conn = _conn[0], None  # reconnect on next call
+        try:
+            await cm.__aexit__(None, None, None)
+        except Exception:
+            pass  # the connection is already broken; nothing left to close
+        raise
+    if isinstance(result, str):
+        raise RuntimeError(result)
+    return result
 
 STAMP_QUERY = "UPDATE command SET queued_at = time::now() WHERE status = 'new' AND queued_at = NONE"
 # SurrealDB 2.x ORDER BY takes field names, not expressions: alias first.

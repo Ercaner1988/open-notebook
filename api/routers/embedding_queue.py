@@ -12,7 +12,12 @@ from pydantic import BaseModel
 from api.command_service import CommandService
 from open_notebook.ai.connection_tester import test_individual_model
 from open_notebook.ai.models import DefaultModels, Model
-from open_notebook.database.repository import ensure_record_id, repo_query
+from open_notebook.database.repository import (
+    db_connection,
+    ensure_record_id,
+    parse_record_ids,
+    repo_query,
+)
 
 router = APIRouter(prefix="/embedding-queue")
 
@@ -27,11 +32,25 @@ class MoveRequest(BaseModel):
 # ---------------------------------------------------------------- helpers
 
 
-async def _titles(source_ids: List[str]) -> Dict[str, str]:
+async def _run(db, query: str, vars: Optional[Dict[str, Any]] = None) -> Any:
+    """repo_query on an already-open connection.
+
+    repo_query opens a new connection and signs in for every call, and the
+    sign-in (argon2 password check) costs ~1 s on this setup - so /summary,
+    polled every 5 s with 7 queries, took 5-30 s. Endpoints that run several
+    queries share one connection through this instead.
+    """
+    result = parse_record_ids(await db.query(query, vars))
+    if isinstance(result, str):
+        raise RuntimeError(result)
+    return result
+
+
+async def _titles(source_ids: List[str], q=repo_query) -> Dict[str, str]:
     ids = list({s for s in source_ids if s})
     if not ids:
         return {}
-    rows = await repo_query(
+    rows = await q(
         "SELECT id, title FROM source WHERE id IN $ids",
         {"ids": [ensure_record_id(i) for i in ids]},
     )
@@ -100,61 +119,66 @@ async def retry_failed_candidates() -> List[str]:
 @router.get("/summary")
 async def summary():
     try:
-        rows = await repo_query(
-            f"SELECT status, count() AS n FROM command WHERE {EMBED} GROUP BY status"
-        )
-        counts = {k: 0 for k in ("new", "running", "completed", "failed", "canceled")}
-        for r in rows:
-            if r["status"] in counts:
-                counts[r["status"]] = r["n"]
-
-        running = await repo_query(
-            f"SELECT id, args, started_at FROM command WHERE {EMBED} AND status = 'running'"
-        )
-        titles = await _titles([(r.get("args") or {}).get("source_id") for r in running])
-        chunks = await repo_query("SELECT count() AS n FROM source_embedding GROUP ALL")
-        state = await repo_query("SELECT paused FROM queue_state:main")
-
-        # source_embedding has no timestamp, so throughput comes from completed jobs'
-        # results (chunks_created / processing_time). finished_at is stamped by
-        # commands/ordered_worker.py; jobs run by the stock worker have none.
-        recent = await repo_query(
-            f"SELECT math::sum(result.chunks_created ?? 0) AS chunks FROM command "
-            f"WHERE {EMBED} AND status = 'completed' "
-            "AND finished_at > time::now() - 10m GROUP ALL"
-        )
-        chunks10 = (recent[0].get("chunks") or 0) if recent else 0
-        rate = chunks10 / 10 if chunks10 else None
-
-        # ponytail: ETA = queued jobs x mean processing_time of jobs completed in the
-        # last hour (single worker). Ignores per-source size differences.
-        avg = await repo_query(
-            f"SELECT math::mean(result.processing_time) AS s FROM command "
-            f"WHERE {EMBED} AND status = 'completed' "
-            "AND finished_at > time::now() - 1h GROUP ALL"
-        )
-        avg_s = avg[0].get("s") if avg else None
-        eta = round(counts["new"] * avg_s / 60, 1) if avg_s else None
-
-        return {
-            "paused": bool(state and state[0].get("paused")),
-            "counts": counts,
-            "running": [
-                {
-                    "id": str(r["id"]),
-                    "source_id": (r.get("args") or {}).get("source_id"),
-                    "source_title": titles.get((r.get("args") or {}).get("source_id")),
-                    "started": str(r["started_at"]) if r.get("started_at") else None,
-                }
-                for r in running
-            ],
-            "embedded_chunks": chunks[0]["n"] if chunks else 0,
-            "rate_chunks_per_min": rate,
-            "eta_minutes": eta,
-        }
+        async with db_connection() as db:
+            return await _summary(lambda query, vars=None: _run(db, query, vars))
     except Exception as e:
         logger.error(f"Error building embedding queue summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _summary(q) -> Dict[str, Any]:
+    rows = await q(
+        f"SELECT status, count() AS n FROM command WHERE {EMBED} GROUP BY status"
+    )
+    counts = {k: 0 for k in ("new", "running", "completed", "failed", "canceled")}
+    for r in rows:
+        if r["status"] in counts:
+            counts[r["status"]] = r["n"]
+
+    running = await q(
+        f"SELECT id, args, started_at FROM command WHERE {EMBED} AND status = 'running'"
+    )
+    titles = await _titles([(r.get("args") or {}).get("source_id") for r in running], q)
+    chunks = await q("SELECT count() AS n FROM source_embedding GROUP ALL")
+    state = await q("SELECT paused FROM queue_state:main")
+
+    # source_embedding has no timestamp, so throughput comes from completed jobs'
+    # results (chunks_created / processing_time). finished_at is stamped by
+    # commands/ordered_worker.py; jobs run by the stock worker have none.
+    recent = await q(
+        f"SELECT math::sum(result.chunks_created ?? 0) AS chunks FROM command "
+        f"WHERE {EMBED} AND status = 'completed' "
+        "AND finished_at > time::now() - 10m GROUP ALL"
+    )
+    chunks10 = (recent[0].get("chunks") or 0) if recent else 0
+    rate = chunks10 / 10 if chunks10 else None
+
+    # ponytail: ETA = queued jobs x mean processing_time of jobs completed in the
+    # last hour (single worker). Ignores per-source size differences.
+    avg = await q(
+        f"SELECT math::mean(result.processing_time) AS s FROM command "
+        f"WHERE {EMBED} AND status = 'completed' "
+        "AND finished_at > time::now() - 1h GROUP ALL"
+    )
+    avg_s = avg[0].get("s") if avg else None
+    eta = round(counts["new"] * avg_s / 60, 1) if avg_s else None
+
+    return {
+        "paused": bool(state and state[0].get("paused")),
+        "counts": counts,
+        "running": [
+            {
+                "id": str(r["id"]),
+                "source_id": (r.get("args") or {}).get("source_id"),
+                "source_title": titles.get((r.get("args") or {}).get("source_id")),
+                "started": str(r["started_at"]) if r.get("started_at") else None,
+            }
+            for r in running
+        ],
+        "embedded_chunks": chunks[0]["n"] if chunks else 0,
+        "rate_chunks_per_min": rate,
+        "eta_minutes": eta,
+    }
 
 
 @router.get("/jobs")
@@ -166,12 +190,17 @@ async def list_jobs(
         where = f"{EMBED}" + (" AND status = $status" if status else "")
         # ORDER BY takes field names, not expressions (SurrealDB 2.x): alias qp.
         order = "qp ASC, queued_at ASC" if status == "new" else "finished_at DESC"
-        rows = await repo_query(
-            f"SELECT *, queue_priority ?? 0 AS qp FROM command WHERE {where} "
-            f"ORDER BY {order} LIMIT $limit",
-            {"status": status, "limit": limit},
-        )
-        titles = await _titles([(r.get("args") or {}).get("source_id") for r in rows])
+        async with db_connection() as db:
+            rows = await _run(
+                db,
+                f"SELECT *, queue_priority ?? 0 AS qp FROM command WHERE {where} "
+                f"ORDER BY {order} LIMIT $limit",
+                {"status": status, "limit": limit},
+            )
+            titles = await _titles(
+                [(r.get("args") or {}).get("source_id") for r in rows],
+                lambda query, vars=None: _run(db, query, vars),
+            )
         return [
             {
                 "id": str(r["id"]),

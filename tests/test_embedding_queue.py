@@ -83,6 +83,8 @@ async def test_retry_failed_dedupes_and_skips_pending():
             return ["source:s1", "source:s1", "source:s2", "source:s3", "source:s4"]
         if "status IN" in query:
             return ["source:s3"]
+        if query.startswith("RETURN"):  # sources that already have embeddings
+            return ["source:s4"]
         # unembedded: s1, s3 have text; s2 empty; s4 is embedded so absent
         return [
             {"id": "source:s1", "title": "1", "has_text": True},
