@@ -24,14 +24,19 @@ services:
     pull_policy: always
 
   open_notebook:
-    image: lfnovo/open_notebook:v1-latest
+    # 2026-09-21 kurtarma: eskiden calisan konteyner yerel imaj kullaniyordu
+    # (docs/'taki genel imaj degil) — ayni imaji koru. Yerel-only imaj: asla
+    # pull denemesin (pull_policy: always registry'de arar, 401 verir).
+    image: open-notebook:local
+    pull_policy: never
     ports:
       - "8502:8502"  # Web UI
       - "5055:5055"  # REST API
     environment:
       # REQUIRED: Change this to your own secret string
       # This encrypts your API keys in the database
-      - OPEN_NOTEBOOK_ENCRYPTION_KEY=change-me-to-a-secret-string
+      # Deger .env dosyasindan geliyor (eski konteynerden aktarildi).
+      - OPEN_NOTEBOOK_ENCRYPTION_KEY=${OPEN_NOTEBOOK_ENCRYPTION_KEY}
 
       # Database connection. SURREAL_USER / SURREAL_PASSWORD default to root:root
       # for local use; override them in a .env file before exposing the instance
@@ -45,7 +50,7 @@ services:
       # OPTIONAL: heavy extraction runtimes, installed on first startup when
       # enabled (downloads are cached on the ./notebook_data volume, so only the
       # first boot is slow). See docs/5-CONFIGURATION/environment-reference.md.
-      # - OPEN_NOTEBOOK_ENABLE_DOCLING=true    # Docling engine + OCR + image sources (large ML stack)
+      - OPEN_NOTEBOOK_ENABLE_DOCLING=${OPEN_NOTEBOOK_ENABLE_DOCLING}
       # - OPEN_NOTEBOOK_ENABLE_CRAWL4AI=true   # local Crawl4AI (bundles a Chromium browser)
       # - CRAWL4AI_API_URL=http://crawl4ai:11235  # use a remote Crawl4AI server instead (no local install)
       # - CRAWL4AI_API_TOKEN=${CRAWL4AI_API_TOKEN}  # bearer token for that server (required by Crawl4AI >= 0.9.0)
@@ -53,10 +58,10 @@ services:
       # OPTIONAL: max concurrent background tasks the worker processes at once
       # (default 5). Set to 1 for sequential processing on single-GPU / local
       # LLM setups to avoid overloading the model with parallel requests.
-      # - OPEN_NOTEBOOK_WORKER_MAX_TASKS=1
+      - OPEN_NOTEBOOK_WORKER_MAX_TASKS=${OPEN_NOTEBOOK_WORKER_MAX_TASKS}
+      - ESPERANTO_EMBEDDING_TIMEOUT=${ESPERANTO_EMBEDDING_TIMEOUT}
     volumes:
       - ./notebook_data:/app/data
     depends_on:
       - surrealdb
     restart: always
-    pull_policy: always
