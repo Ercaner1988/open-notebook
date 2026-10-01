@@ -121,3 +121,29 @@ async def test_test_embedding_ok():
         patch.object(eq, "test_individual_model", AsyncMock(return_value=(True, "fine"))),
     ):
         assert await eq.test_embedding() == {"ok": True, "message": "fine", "model_id": "model:m"}
+
+
+@pytest.mark.asyncio
+async def test_eta_follows_text_size_not_job_count():
+    """One queued 1.2 M-char book must take far longer than one 1 k-char note."""
+
+    def fake_db(pending):
+        async def fake(query, vars=None):
+            if "GROUP BY status" in query:
+                return [{"status": "new", "n": len(pending)}]
+            if "status IN ['new', 'running']" in query:
+                return [{"id": "command:x", "status": "new", "args": {"source_id": s}} for s in pending]
+            if "processing_time AS secs" in query:  # one finished job: 600 k chars in 600 s
+                return [{"source_id": "source:done", "secs": 600.0}]
+            if "string::len" in query:
+                sizes = {"source:done": 600_000, "source:book": 1_200_000, "source:note": 1_000}
+                return [{"id": i, "n": sizes[str(i)]} for i in map(str, vars["ids"])]
+            return []
+
+        return fake
+
+    eq._source_chars_cache.clear()
+    book = await eq._summary(fake_db(["source:book"]))
+    note = await eq._summary(fake_db(["source:note"]))
+    assert book["eta_minutes"] == 20.0  # 1.2 M chars / 1000 chars/s = 1200 s
+    assert note["eta_minutes"] == 0.0  # 1 s, rounds to 0.0 min
