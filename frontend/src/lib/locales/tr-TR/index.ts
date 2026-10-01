@@ -810,6 +810,8 @@ export const trTR = {
     rate: "Hız",
     rateValue: "{{rate}} parça/dk",
     eta: "Tahmini bitiş",
+    remainingChars: "Kalan metin",
+    charsValue: "{{chars}} karakter",
     etaMinutes: "{{minutes}} dk",
     etaHours: "{{hours}} sa {{minutes}} dk",
     created: "Kuyruğa alındı: {{time}}",

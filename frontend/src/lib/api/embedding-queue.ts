@@ -9,6 +9,7 @@ export interface QueueSummary {
   embedded_chunks: number
   rate_chunks_per_min: number | null
   eta_minutes: number | null
+  pending_chars: number
 }
 
 export interface QueueJob {

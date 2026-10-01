@@ -206,6 +206,7 @@ async def _summary(q) -> Dict[str, Any]:
         "embedded_chunks": chunks[0]["n"] if chunks else 0,
         "rate_chunks_per_min": rate,
         "eta_minutes": eta,
+        "pending_chars": pending_chars,
     }
 
 

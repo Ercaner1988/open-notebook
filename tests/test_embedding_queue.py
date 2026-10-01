@@ -147,3 +147,4 @@ async def test_eta_follows_text_size_not_job_count():
     note = await eq._summary(fake_db(["source:note"]))
     assert book["eta_minutes"] == 20.0  # 1.2 M chars / 1000 chars/s = 1200 s
     assert note["eta_minutes"] == 0.0  # 1 s, rounds to 0.0 min
+    assert book["pending_chars"] == 1_200_000

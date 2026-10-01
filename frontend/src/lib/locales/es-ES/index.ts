@@ -811,6 +811,8 @@ export const esES = {
     rate: "Rate",
     rateValue: "{{rate}} chunks/min",
     eta: "ETA",
+    remainingChars: "Remaining text",
+    charsValue: "{{chars}} chars",
     etaMinutes: "{{minutes}} min",
     etaHours: "{{hours}} h {{minutes}} min",
     created: "Queued {{time}}",
