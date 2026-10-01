@@ -145,13 +145,15 @@ async def _summary(q) -> Dict[str, Any]:
     # source_embedding has no timestamp, so throughput comes from completed jobs'
     # results (chunks_created / processing_time). finished_at is stamped by
     # commands/ordered_worker.py; jobs run by the stock worker have none.
+    # A 1 h window, not 10 min: a single book can take 25+ minutes, and a
+    # shorter window often held no finished job, so the rate showed "—".
     recent = await q(
         f"SELECT math::sum(result.chunks_created ?? 0) AS chunks FROM command "
         f"WHERE {EMBED} AND status = 'completed' "
-        "AND finished_at > time::now() - 10m GROUP ALL"
+        "AND finished_at > time::now() - 1h GROUP ALL"
     )
-    chunks10 = (recent[0].get("chunks") or 0) if recent else 0
-    rate = chunks10 / 10 if chunks10 else None
+    chunks_1h = (recent[0].get("chunks") or 0) if recent else 0
+    rate = round(chunks_1h / 60, 1) if chunks_1h else None
 
     # ponytail: ETA = queued jobs x mean processing_time of jobs completed in the
     # last hour (single worker). Ignores per-source size differences.
