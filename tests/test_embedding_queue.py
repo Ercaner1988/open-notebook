@@ -148,3 +148,27 @@ async def test_eta_follows_text_size_not_job_count():
     assert book["eta_minutes"] == 20.0  # 1.2 M chars / 1000 chars/s = 1200 s
     assert note["eta_minutes"] == 0.0  # 1 s, rounds to 0.0 min
     assert book["pending_chars"] == 1_200_000
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,err,paused",
+    [
+        ("failed", "Failed to generate embeddings: All connection attempts failed", True),
+        ("failed", "Model returned 400: input too long", False),
+        ("completed", None, False),
+    ],
+)
+async def test_unreachable_embed_server_pauses_and_requeues(status, err, paused):
+    calls = []
+
+    async def fake(query, vars=None):
+        calls.append(query)
+        if query.startswith("SELECT status"):
+            return [{"status": status, "error_message": err}]
+        return []
+
+    with patch.object(ow, "repo_query", fake):
+        await ow.pause_if_unreachable("command:a")
+    assert any("paused = true" in q for q in calls) is paused
+    assert any("status = 'new'" in q for q in calls) is paused
