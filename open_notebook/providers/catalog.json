@@ -1,0 +1,59 @@
+[
+  {
+    "id": "bge-embed-rs",
+    "name": "bge-embed-rs",
+    "description": {
+      "en": "Lightweight, pure-Rust bge-m3 embedding server with OpenAI-compatible API and candle backend.",
+      "tr": "Saf Rust, candle altyapılı, bge-m3 modelli, OpenAI uyumlu hafif yerel gömme sunucusu."
+    },
+    "homepage": "https://github.com/Ercaner1988/bge-embed-rs",
+    "download_url": "https://github.com/Ercaner1988/bge-embed-rs/releases",
+    "kind": "embedding",
+    "base_url": "http://127.0.0.1:11435/v1",
+    "probe_ports": [11434, 11435],
+    "health_path": "/health",
+    "model": "bge-m3",
+    "dimension": 1024,
+    "provider_type": "openai_compatible",
+    "credential_name": "bge-embed-rs",
+    "notes": "Varsayılan port 11435'tir; 11434 portu da kontrol edilir."
+  },
+  {
+    "id": "ollama",
+    "name": "Ollama",
+    "description": {
+      "en": "Local model runner supporting bge-m3, nomic-embed-text and other open-source embedding models.",
+      "tr": "bge-m3, nomic-embed-text ve diğer açık kaynak gömme modellerini çalıştıran yerel model sunucusu."
+    },
+    "homepage": "https://ollama.com",
+    "download_url": "https://ollama.com/download",
+    "kind": "embedding",
+    "base_url": "http://127.0.0.1:11434/v1",
+    "probe_ports": [11434],
+    "health_path": "/api/tags",
+    "model": "bge-m3",
+    "dimension": 1024,
+    "provider_type": "openai_compatible",
+    "credential_name": "ollama-embedding",
+    "notes": "Öncesinde 'ollama pull bge-m3' komutu çalıştırılmalıdır."
+  },
+  {
+    "id": "lm-studio",
+    "name": "LM Studio",
+    "description": {
+      "en": "Desktop app to run local LLMs and embedding models with OpenAI-compatible local server.",
+      "tr": "OpenAI uyumlu yerel sunucu ile yerel YZ ve gömme modellerini çalıştıran masaüstü uygulaması."
+    },
+    "homepage": "https://lmstudio.ai",
+    "download_url": "https://lmstudio.ai/download",
+    "kind": "embedding",
+    "base_url": "http://127.0.0.1:1234/v1",
+    "probe_ports": [1234],
+    "health_path": "/v1/models",
+    "model": "text-embedding-bge-m3",
+    "dimension": 1024,
+    "provider_type": "openai_compatible",
+    "credential_name": "lm-studio-embedding",
+    "notes": "LM Studio yerel sunucusu başlatılmış ve gömme modeli yüklenmiş olmalıdır."
+  }
+]

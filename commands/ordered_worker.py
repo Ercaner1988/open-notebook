@@ -16,36 +16,13 @@ import asyncio
 from loguru import logger
 
 import commands  # noqa: F401  registers all commands (like --import-modules commands)
-from open_notebook.database.repository import (
-    db_connection,
-    ensure_record_id,
-    parse_record_ids,
-)
+from open_notebook.database.repository import ensure_record_id, repo_query
 
 POLL_SECONDS = 1.0
 
-# One long-lived connection instead of the stock repo_query's connect + sign-in
-# per call: sign-in costs ~1 s (argon2), and this loop queries every second.
-_conn = None  # (context manager, db)
-
-
-async def repo_query(query, vars=None):
-    global _conn
-    if _conn is None:
-        cm = db_connection()
-        _conn = (cm, await cm.__aenter__())
-    try:
-        result = parse_record_ids(await _conn[1].query(query, vars))
-    except Exception:
-        cm, _conn = _conn[0], None  # reconnect on next call
-        try:
-            await cm.__aexit__(None, None, None)
-        except Exception:
-            pass  # the connection is already broken; nothing left to close
-        raise
-    if isinstance(result, str):
-        raise RuntimeError(result)
-    return result
+# Embedding server unreachable (closed before Open Notebook, crashed): without
+# this the worker drains the whole queue into 'failed' within seconds.
+UNREACHABLE = ("All connection attempts failed", "Connection refused", "ConnectError")
 
 STAMP_QUERY = "UPDATE command SET queued_at = time::now() WHERE status = 'new' AND queued_at = NONE"
 # SurrealDB 2.x ORDER BY takes field names, not expressions: alias first.
@@ -84,6 +61,22 @@ async def run_one(cmd: dict) -> None:
         )
     finally:
         await repo_query("UPDATE $id SET finished_at = time::now()", {"id": cmd_id})
+        if "embed" in cmd["name"]:  # in finally: also when execute_command raises
+            await pause_if_unreachable(cmd_id)
+
+
+async def pause_if_unreachable(cmd_id) -> None:
+    """Embed failed because the server is down: put it back and pause the queue."""
+    rows = await repo_query("SELECT status, error_message FROM $id", {"id": cmd_id})
+    row = rows[0] if rows else {}
+    err = row.get("error_message") or ""
+    if row.get("status") == "failed" and any(m in err for m in UNREACHABLE):
+        await repo_query(
+            "UPDATE $id SET status = 'new', error_message = NONE, started_at = NONE, finished_at = NONE",
+            {"id": cmd_id},
+        )
+        await repo_query("UPSERT queue_state:main SET paused = true")
+        logger.warning(f"Embedding server unreachable; requeued {cmd_id} and paused the queue")
 
 
 async def main() -> None:

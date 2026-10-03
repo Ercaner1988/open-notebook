@@ -1,0 +1,2 @@
+REMOVE INDEX IF EXISTS idx_source_updated ON source;
+REMOVE INDEX IF EXISTS idx_source_created ON source;

@@ -302,9 +302,17 @@ async def get_sources(
         else:
             from_clause = "source"
 
-        # Query sources - include command field with FETCH
+        # Project only the command fields read below instead of `FETCH command`:
+        # a process_source command's args carry the source's full text (1-3 MB
+        # per row), and FETCH shipped all of it for every listed source.
+        # Keeps FETCH's shapes: None when unset, the bare link when dangling.
         query = f"""
-            SELECT id, asset, created, title, updated, topics, command,
+            SELECT id, asset, created, title, updated, topics,
+            IF command.id != NONE THEN {{
+                id: command.id, status: command.status,
+                error_message: command.error_message,
+                result: {{ execution_metadata: command.result.execution_metadata }}
+            }} ELSE command END AS command,
             string::lowercase(title OR '') AS title_sort,
             ({SOURCE_TYPE_EXPRESSION}) AS type,
             (SELECT VALUE count() FROM source_insight WHERE source = $parent.id GROUP ALL)[0].count OR 0 AS insights_count,
@@ -312,12 +320,11 @@ async def get_sources(
             FROM {from_clause}
             {order_clause}
             LIMIT $limit START $offset
-            FETCH command
         """
         result = await repo_query(query, params)
 
         # Convert result to response model
-        # Command data is already fetched via FETCH command clause
+        # Command fields are projected in the query above
         response_list = []
         for row in result:
             command = row.get("command")
@@ -325,7 +332,7 @@ async def get_sources(
             status = None
             processing_info = None
 
-            # Extract status from fetched command object (already resolved by FETCH)
+            # Extract status from the projected command object
             if command and isinstance(command, dict):
                 command_id = str(command.get("id")) if command.get("id") else None
                 status = command.get("status")
@@ -342,7 +349,7 @@ async def get_sources(
                     "error": _truncate_error(command.get("error_message")),
                 }
             elif command:
-                # Command exists but FETCH failed to resolve it (broken reference)
+                # Command link points at a deleted record (dangling reference)
                 command_id = str(command)
                 status = "unknown"
 

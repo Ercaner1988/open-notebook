@@ -1,5 +1,8 @@
+import asyncio
 import os
 import re
+import time
+import weakref
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TypeVar, Union
@@ -82,8 +85,18 @@ def ensure_record_id(value: Union[str, RecordID]) -> RecordID:
     return RecordID.parse(value)
 
 
-@asynccontextmanager
-async def db_connection():
+# Idle-connection pool, one per event loop (a websocket connection is bound
+# to the loop that opened it; tests run many loops). Opening a connection
+# means a sign-in, and SurrealDB verifies the password with argon2 - ~1 s per
+# call on a laptop - which every repo_* call used to pay.
+_POOL_MAX_IDLE = 8
+_POOL_MAX_IDLE_SECONDS = 300  # older idle connections are closed, not reused
+_pools: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, list]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+async def _open_connection() -> AsyncSurreal:
     db = AsyncSurreal(get_database_url())
     await db.signin(
         {
@@ -92,10 +105,46 @@ async def db_connection():
         }
     )
     await db.use(get_database_namespace(), get_database_name())
+    return db
+
+
+async def _close_quietly(db: AsyncSurreal) -> None:
+    try:
+        await db.close()
+    except Exception:
+        pass  # already broken; nothing left to release
+
+
+@asynccontextmanager
+async def db_connection():
+    """Borrow a signed-in connection for the duration of the block.
+
+    The connection is exclusive to the borrower (so multi-statement work stays
+    on one session) and goes back to the pool only if the block finished
+    without an exception; on any error it is closed, so a broken socket is
+    never handed out again.
+    """
+    pool = _pools.setdefault(asyncio.get_running_loop(), [])
+    db = None
+    now = time.monotonic()
+    while pool:
+        candidate, idle_since = pool.pop()
+        if now - idle_since < _POOL_MAX_IDLE_SECONDS:
+            db = candidate
+            break
+        await _close_quietly(candidate)
+    if db is None:
+        db = await _open_connection()
+
+    reusable = False
     try:
         yield db
+        reusable = True
     finally:
-        await db.close()
+        if reusable and len(pool) < _POOL_MAX_IDLE:
+            pool.append((db, time.monotonic()))
+        else:
+            await _close_quietly(db)
 
 
 async def repo_query(

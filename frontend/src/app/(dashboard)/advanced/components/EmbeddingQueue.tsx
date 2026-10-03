@@ -309,13 +309,14 @@ export function EmbeddingQueue() {
                 <Stat label={t('embeddingQueue.failed')} value={summary.counts.failed} />
               </div>
 
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <Stat label={t('embeddingQueue.chunksEmbedded')} value={summary.embedded_chunks.toLocaleString()} />
                 <Stat
                   label={t('embeddingQueue.rate')}
                   value={summary.rate_chunks_per_min == null ? '—' : t('embeddingQueue.rateValue', { rate: Math.round(summary.rate_chunks_per_min) })}
                 />
                 <Stat label={t('embeddingQueue.eta')} value={etaText} />
+                <Stat label={t('embeddingQueue.remainingChars')} value={t('embeddingQueue.charsValue', { chars: summary.pending_chars.toLocaleString() })} />
               </div>
 
               {current && (

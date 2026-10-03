@@ -46,12 +46,31 @@ async def _run(db, query: str, vars: Optional[Dict[str, Any]] = None) -> Any:
     return result
 
 
+# Source text length by id. A queued source's text doesn't change, and reading
+# full_text is the expensive part (hundreds of MB across a library), so each
+# length is read once per API process (~4 s for ~500 sources, then free).
+_source_chars_cache: Dict[str, int] = {}
+
+
+async def _source_chars(source_ids: List[str], q=repo_query) -> Dict[str, int]:
+    missing = list({s for s in source_ids if s and s not in _source_chars_cache})
+    if missing:
+        rows = await q(
+            "SELECT id, string::len(full_text ?? '') AS n FROM $ids",
+            {"ids": [ensure_record_id(i) for i in missing]},
+        )
+        found = {str(r["id"]): r.get("n") or 0 for r in rows}
+        for s in missing:
+            _source_chars_cache[s] = found.get(s, 0)  # deleted source: no work left
+    return _source_chars_cache
+
+
 async def _titles(source_ids: List[str], q=repo_query) -> Dict[str, str]:
     ids = list({s for s in source_ids if s})
     if not ids:
         return {}
     rows = await q(
-        "SELECT id, title FROM source WHERE id IN $ids",
+        "SELECT id, title FROM $ids",
         {"ids": [ensure_record_id(i) for i in ids]},
     )
     return {str(r["id"]): r.get("title") or "" for r in rows}
@@ -135,9 +154,14 @@ async def _summary(q) -> Dict[str, Any]:
         if r["status"] in counts:
             counts[r["status"]] = r["n"]
 
-    running = await q(
-        f"SELECT id, args, started_at FROM command WHERE {EMBED} AND status = 'running'"
+    # One scan for both the running list and the ETA's queued text: the command
+    # table holds process_source records whose args carry whole books.
+    queued = await q(
+        f"SELECT id, status, args, started_at FROM command WHERE {EMBED} "
+        "AND status IN ['new', 'running']"
     )
+    running = [r for r in queued if r.get("status") == "running"]
+    pending = [(r.get("args") or {}).get("source_id") for r in queued]
     titles = await _titles([(r.get("args") or {}).get("source_id") for r in running], q)
     chunks = await q("SELECT count() AS n FROM source_embedding GROUP ALL")
     state = await q("SELECT paused FROM queue_state:main")
@@ -145,23 +169,27 @@ async def _summary(q) -> Dict[str, Any]:
     # source_embedding has no timestamp, so throughput comes from completed jobs'
     # results (chunks_created / processing_time). finished_at is stamped by
     # commands/ordered_worker.py; jobs run by the stock worker have none.
-    recent = await q(
-        f"SELECT math::sum(result.chunks_created ?? 0) AS chunks FROM command "
-        f"WHERE {EMBED} AND status = 'completed' "
-        "AND finished_at > time::now() - 10m GROUP ALL"
+    # A 1 h window, not 10 min: a single book can take 25+ minutes, and a
+    # shorter window often held no finished job, so the rate showed "—".
+    # ETA by text size, not job count: a 7 MB book and a 20 KB article are one
+    # job each but differ ~300x in work. Throughput = characters embedded per
+    # second of processing over recent jobs (~800-950 chars/s per job on this
+    # machine, fairly flat); remaining = text still queued.
+    # ponytail: the running job counts in full (overestimates by < 1 book).
+    done = await q(
+        f"SELECT args.source_id AS source_id, result.processing_time AS secs, "
+        "result.chunks_created AS chunks, finished_at > time::now() - 1h AS last_hour "
+        f"FROM command WHERE {EMBED} AND status = 'completed' "
+        "AND finished_at > time::now() - 6h"
     )
-    chunks10 = (recent[0].get("chunks") or 0) if recent else 0
-    rate = chunks10 / 10 if chunks10 else None
-
-    # ponytail: ETA = queued jobs x mean processing_time of jobs completed in the
-    # last hour (single worker). Ignores per-source size differences.
-    avg = await q(
-        f"SELECT math::mean(result.processing_time) AS s FROM command "
-        f"WHERE {EMBED} AND status = 'completed' "
-        "AND finished_at > time::now() - 1h GROUP ALL"
-    )
-    avg_s = avg[0].get("s") if avg else None
-    eta = round(counts["new"] * avg_s / 60, 1) if avg_s else None
+    chunks_1h = sum(d.get("chunks") or 0 for d in done if d.get("last_hour"))
+    rate = round(chunks_1h / 60, 1) if chunks_1h else None
+    chars = await _source_chars(pending + [d["source_id"] for d in done], q)
+    pending_chars = sum(chars.get(s, 0) for s in pending)
+    done_chars = sum(chars.get(d["source_id"], 0) for d in done)
+    done_secs = sum(d.get("secs") or 0 for d in done)
+    chars_per_sec = done_chars / done_secs if done_secs else 0
+    eta = round(pending_chars / chars_per_sec / 60, 1) if chars_per_sec else None
 
     return {
         "paused": bool(state and state[0].get("paused")),
@@ -178,6 +206,7 @@ async def _summary(q) -> Dict[str, Any]:
         "embedded_chunks": chunks[0]["n"] if chunks else 0,
         "rate_chunks_per_min": rate,
         "eta_minutes": eta,
+        "pending_chars": pending_chars,
     }
 
 
