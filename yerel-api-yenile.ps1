@@ -1,12 +1,15 @@
 # Yalniz API'yi (uvicorn :5055) yeniden baslatir; SurrealDB, isci ve arayuz calismaya devam eder.
 # API kodu degisince kullan: gomme isi kesilmez. Migration da API acilisinda kosar.
+# Her zaman ayri bir kabuktan cagir (Start-Process powershell -WindowStyle Hidden -File ...):
+# dogrudan uzun omurlu bir kabuktan baslatilan hizmet, o kabuk kapaninca onunla birlikte oluyor.
 $ErrorActionPreference = "Stop"
 $D = $PSScriptRoot
 Set-Location $D
 $UV = "C:\Users\buzbe\AppData\Local\hermes\bin\uv.exe"
 
 $eski = (Get-Content "$D\logs\pids.txt" | Where-Object { $_ -like "api=*" } | Select-Object -Last 1) -replace "api=", ""
-if ($eski) { taskkill /T /F /PID $eski 2>$null | Out-Null }
+# taskkill cmd icinde: PS 5.1 "Stop" altinda stderr satirini (orn. "not found") hata sayip betigi keser, yeni api hic baslamaz.
+if ($eski) { cmd /c "taskkill /T /F /PID $eski >nul 2>&1" }
 while (Get-NetTCPConnection -State Listen -LocalPort 5055 -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 300 }
 
 Get-Content "$D\.env" | Where-Object { $_ -match '^\s*[A-Z_]+=' } | ForEach-Object {
