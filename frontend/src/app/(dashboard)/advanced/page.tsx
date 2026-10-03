@@ -1,6 +1,7 @@
 'use client'
 
 import { AppShell } from '@/components/layout/AppShell'
+import { ProviderStore } from './components/ProviderStore'
 import { EmbeddingQueue } from './components/EmbeddingQueue'
 import { RebuildEmbeddings } from './components/RebuildEmbeddings'
 import { SystemInfo } from './components/SystemInfo'
@@ -21,6 +22,7 @@ export default function AdvancedPage() {
             </div>
 
             <SystemInfo />
+            <ProviderStore />
             <EmbeddingQueue />
             <RebuildEmbeddings />
           </div>
