@@ -12,7 +12,11 @@ from open_notebook.ai.connection_tester import test_individual_model
 from open_notebook.ai.models import DefaultModels, Model
 from open_notebook.database.repository import ensure_record_id, repo_delete, repo_query
 from open_notebook.domain.credential import Credential
-from open_notebook.providers import ProviderCatalogItem, ProviderDescription, load_catalog
+from open_notebook.providers import (
+    ProviderCatalogItem,
+    ProviderDescription,
+    load_catalog,
+)
 
 # In-memory probe cache: { item_id: (timestamp, is_running, detected_url) }
 _PROBE_CACHE: Dict[str, Tuple[float, bool, Optional[str]]] = {}
