@@ -124,13 +124,14 @@ describe('Unused Key Detection', () => {
   it(
     'all en-US leaf keys should be referenced in source files',
     () => {
-      const srcDir = path.resolve(__dirname, '../../..')
+      const srcDir = path.resolve(__dirname, '../..')
       const localesDir = path.resolve(__dirname)
 
       const files = fs.readdirSync(srcDir, { recursive: true }) as string[]
       const sourceFiles = files.filter(f => {
         const full = path.join(srcDir, f)
         if (full.startsWith(localesDir)) return false
+        if (full.includes('node_modules') || full.includes('.next')) return false
         if (f.endsWith('.test.ts') || f.endsWith('.test.tsx')) return false
         return f.endsWith('.ts') || f.endsWith('.tsx')
       })
