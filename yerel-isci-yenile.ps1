@@ -12,7 +12,7 @@ $duraklamisti = $ozet.paused
 if (-not $duraklamisti) { Invoke-RestMethod -Method Post "$Q/pause" | Out-Null }
 while ((Invoke-RestMethod "$Q/summary" -TimeoutSec 60).counts.running -gt 0) { Start-Sleep 10 }
 
-$eski = (Get-Content "$D\logs\pids.txt" | Where-Object { $_ -like "worker=*" } | Select-Object -Last 1) -replace "worker=", ""
+$eski = (Get-Content "$D\logs\pids.txt" -ErrorAction SilentlyContinue | Where-Object { $_ -like "worker=*" } | Select-Object -Last 1) -replace "worker=", ""
 if ($eski) { cmd /c "taskkill /T /F /PID $eski >nul 2>&1" }  # cmd icinde: PS 5.1 stderr'i hata sayar
 
 Get-Content "$D\.env" | Where-Object { $_ -match '^\s*[A-Z_]+=' } | ForEach-Object {

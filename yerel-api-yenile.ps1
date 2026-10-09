@@ -7,7 +7,7 @@ $D = $PSScriptRoot
 Set-Location $D
 $UV = "C:\Users\buzbe\AppData\Local\hermes\bin\uv.exe"
 
-$eski = (Get-Content "$D\logs\pids.txt" | Where-Object { $_ -like "api=*" } | Select-Object -Last 1) -replace "api=", ""
+$eski = (Get-Content "$D\logs\pids.txt" -ErrorAction SilentlyContinue | Where-Object { $_ -like "api=*" } | Select-Object -Last 1) -replace "api=", ""
 # taskkill cmd icinde: PS 5.1 "Stop" altinda stderr satirini (orn. "not found") hata sayip betigi keser, yeni api hic baslamaz.
 if ($eski) { cmd /c "taskkill /T /F /PID $eski >nul 2>&1" }
 while (Get-NetTCPConnection -State Listen -LocalPort 5055 -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 300 }
